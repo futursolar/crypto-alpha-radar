@@ -29,7 +29,8 @@ crypto-alpha-radar/
 │   ├── smart_money.py   # 多链聪明钱 / 庄地址抓取（GMGN）
 │   └── social.py        # 社媒趋势 / "为什么涨" 分析
 ├── scorer/
-│   └── engine.py        # 聪明钱 + 注意力 vs 市值 -> 0-100 评分
+│   ├── engine.py        # 聪明钱 + 注意力 vs 市值 -> 0-100 评分（启发式）
+│   └── jev_scorer.py    # Jev (TypeSafe) 决策模型做最终裁决（可选，需 key）
 ├── alerts/
 │   └── email_sender.py  # 邮箱推送（推到你的邮箱）
 ├── storage/
@@ -47,7 +48,7 @@ crypto-alpha-radar/
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # 填入 GMGN_API_KEY、EMAIL_TO、SMTP_*
+cp .env.example .env        # 填入 GMGN_API_KEY、EMAIL_TO、SMTP_*，可选 TYPESAFE_API_KEY（Jev 裁决）
 python main.py --dry-run    # 先空跑看输出
 python main.py              # 正式跑（达到阈值推邮箱）
 python main.py --chain sol eth   # 只跑指定链
@@ -56,7 +57,7 @@ python main.py --chain sol eth   # 只跑指定链
 ## 四、部署到 GitHub Actions（零成本、无服务器）
 
 1. 把仓库设为 **Public**（或 Private 也行，Actions 免费额度有限）。
-2. Settings → Secrets → 添加：`GMGN_API_KEY`、`EMAIL_TO`、`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`（可选 `LUNARCRUSH_API_KEY`）。
+2. Settings → Secrets → 添加：`GMGN_API_KEY`、`EMAIL_TO`、`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`、`TYPESAFE_API_KEY`（可选 `LUNARCRUSH_API_KEY`、`JEV_BASE_URL`）。
 3. 已内置 `.github/workflows/scheduled.yml`，每 30 分钟自动跑并推邮箱。
 
 ## 五、评分逻辑（贴合"小亏大赚"）
@@ -69,6 +70,29 @@ python main.py --chain sol eth   # 只跑指定链
 - 达到 `alert_threshold`（默认 60）才推送，避免噪音。
 
 权重和阈值都在 `config/settings.json` 里调。
+
+## 五（续）、Jev 决策模型裁决（可选增强，强烈建议）
+
+启发式评分（0-100）是「粗筛」，Jev 是「精筛裁决」。它来自 [TypeSafe](https://typesafe.ai) 的 **Jev / System One** 决策模型——你喂结构化状态 + 带类型的问题，它返回**带概率的判断**，不写一句话。这里只用它做三类判断，不预测涨跌：
+
+- `verdict`：`ape` / `watch` / `avoid`（吃 / 看 / 躲）
+- `conviction`：0-10 强度
+- `high_conviction`：是否高确定性（0~1 概率）
+
+**为什么用 Jev 而不用启发式硬权重**：Jev 在「对结构化特征做分类」上更稳（社媒多空、合约安全、是否 bait），回测也证明它**不是方向预测器**（方向命中率 ~0.49、过度自信），所以定位是「过滤器/评级器」，不是水晶球——正好贴合「小亏大赚」：帮挡噪音、给确定性打分，不替你 call 顶底。
+
+**接入方式**：
+1. 注册 https://console.typesafe.ai 拿 key（新用户送 $5 额度，约 1.2 亿 input token，够长期测）。
+2. 填 `.env` 的 `TYPESAFE_API_KEY`（Actions 里填 Secret）。成本极低（input $0.042/百万 token、output 免费，本项目约 $0.01–0.4/月）。
+3. `config/settings.json` 的 `jev` 段：
+   - `enabled`：true 即启用。
+   - `model`：固定 `jev-1.13.0`（**别用 `jev-latest`**，别名会变、破坏可复现）。
+   - `min_confidence`：裁决置信度阈值（默认 0.7）。
+   - `allow_verdicts`：允许推送的裁决（默认 `["ape","watch"]`，即 avoid 不推）。
+   - `n_samples`：同请求采样次数取平均（Jev 非确定性，差可达 0.07；默认 1，想更稳设 3）。
+4. **降级保障**：不填 `TYPESAFE_API_KEY` 或 `enabled=false` 时，`JevScorer.available=False`，main 自动退回纯启发式（达阈值即推），不报错。填了 key 但某次调用失败，该 token 本轮回退丢弃（保守，防误报）。
+
+> 注意：Jev 仅文本、**英文最佳**，状态已统一翻成英文 label；中文直接喂效果差。
 
 ## 六、重要声明
 
