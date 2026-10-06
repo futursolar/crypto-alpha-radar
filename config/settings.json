@@ -19,6 +19,15 @@
     },
     "alert_threshold": 60
   },
+  "jev": {
+    "enabled": true,
+    "model": "jev-1.13.0",
+    "base_url": "https://api.typesafe.ai/v1/systemone",
+    "min_confidence": 0.7,
+    "allow_verdicts": ["ape", "watch"],
+    "n_samples": 1,
+    "timeout_seconds": 20
+  },
   "email": {
     "to": "",
     "smtp_host": "smtp.qq.com",
