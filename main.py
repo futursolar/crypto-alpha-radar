@@ -18,10 +18,12 @@ sys.path.insert(0, str(ROOT))
 import collectors.smart_money as sm  # noqa: E402
 import collectors.social as social  # noqa: E402
 import scorer.engine as engine  # noqa: E402
+import scorer.jev_scorer as jev_scorer  # noqa: E402
 import alerts.email_sender as email_sender  # noqa: E402
 import storage.store as store  # noqa: E402
 
 SETTINGS = json.loads((ROOT / "config" / "settings.json").read_text(encoding="utf-8"))
+SCORER = jev_scorer.JevScorer(SETTINGS)  # 无 TYPESAFE_API_KEY 时 available=False，自动降级
 
 
 def run(dry_run: bool = False, chains: list[str] | None = None) -> None:
@@ -29,6 +31,12 @@ def run(dry_run: bool = False, chains: list[str] | None = None) -> None:
     periods = SETTINGS["periods"]
     seen = store.load()
     alerts: list[dict] = []
+
+    if SCORER.available:
+        print(f"[main] Jev 裁决已启用（model={SCORER.model}, 门控={SCORER.allow_verdicts}, "
+              f"min_conf={SCORER.min_confidence}）")
+    else:
+        print("[main] Jev 未启用/无 key：使用启发式引擎（仅达阈值即推送）")
 
     for chain in chains:
         for period in periods:
@@ -48,9 +56,18 @@ def run(dry_run: bool = False, chains: list[str] | None = None) -> None:
                 soc = social.analyze(chain, tk)
                 sc = engine.score(tk, soc, SETTINGS["scoring"]["weights"],
                                   SETTINGS["min_market_cap"], SETTINGS["max_market_cap"])
-                if sc["score"] >= SETTINGS["scoring"]["alert_threshold"]:
-                    alerts.append({"token": tk, "social": soc, "score": sc})
-                    store.mark(seen, chain, addr, sc["score"])
+                if sc["score"] < SETTINGS["scoring"]["alert_threshold"]:
+                    continue
+                # Jev 最终裁决（若启用且有 key）
+                jr = None
+                if SCORER.available:
+                    jr = SCORER.score(tk, soc, SETTINGS)
+                    if jr is None:
+                        continue  # 调用失败，保守丢弃，避免误报
+                    if jr["decision"] != "pass":
+                        continue  # Jev 说 avoid 或置信度不足
+                alerts.append({"token": tk, "social": soc, "score": sc, "jev": jr})
+                store.mark(seen, chain, addr, sc["score"])
 
     store.save(seen)
     if not alerts:
@@ -59,8 +76,10 @@ def run(dry_run: bool = False, chains: list[str] | None = None) -> None:
     alerts.sort(key=lambda x: x["score"]["score"], reverse=True)
     print(f"[main] 命中 {len(alerts)} 个信号：")
     for a in alerts:
+        jev_txt = (f" jev={a['jev']['verdict']}(conf={a['jev']['confidence']},"
+                   f"conv={a['jev']['conviction']})") if a["jev"] else ""
         print(f"  {a['token']['chain']} {a['token']['symbol']} "
-              f"分={a['score']['score']} 原因={a['social']['reasons']}")
+              f"分={a['score']['score']}{jev_txt} 原因={a['social']['reasons']}")
     if not dry_run:
         email_sender.send(alerts, SETTINGS["email"])
 
