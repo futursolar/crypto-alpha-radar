@@ -1,0 +1,29 @@
+{
+  "chains": ["sol", "eth", "bsc", "base"],
+  "periods": ["1h", "6h", "24h"],
+  "rank_limit": 50,
+  "filters": ["not_honeypot", "verified", "renounced"],
+  "min_market_cap": 30000,
+  "max_market_cap": 5000000,
+  "min_smart_buy": 3,
+  "social": {
+    "lunarcrush_api_key": "",
+    "min_social_score": 0
+  },
+  "scoring": {
+    "weights": {
+      "smart_money_ratio": 0.35,
+      "attention_vs_mcap": 0.30,
+      "volume_surge": 0.20,
+      "safety": 0.15
+    },
+    "alert_threshold": 60
+  },
+  "email": {
+    "to": "",
+    "smtp_host": "smtp.qq.com",
+    "smtp_port": 465,
+    "smtp_user": "",
+    "smtp_pass": ""
+  }
+}
