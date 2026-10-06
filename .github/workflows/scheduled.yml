@@ -17,6 +17,7 @@ jobs:
       - run: python main.py
         env:
           GMGN_API_KEY: ${{ secrets.GMGN_API_KEY }}
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           JEV_BASE_URL: ${{ secrets.JEV_BASE_URL }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}

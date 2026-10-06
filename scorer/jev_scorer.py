@@ -10,8 +10,11 @@
   - 无 TYPESAFE_API_KEY 时 available=False，main 自动降级回启发式引擎，不报错。
   - 非确定性（同请求概率差可达 0.07），可配 n_samples 多次取平均。
 
-端点（多源实测 2026-09）：POST https://api.typesafe.ai/v1/systemone
-Auth: Bearer $TYPESAFE_API_KEY
+支持两种接入（请求/响应格式完全一致，只改 endpoint / model / key）：
+  - TypeSafe 直连：POST https://api.typesafe.ai/v1/systemone，model=jev-1.13.0，key=TYPESAFE_API_KEY
+  - Vercel AI Gateway（免费 $5/月额度，Jev 为 free-tier 模型，正合「不花钱」）：
+    POST https://ai-gateway.vercel.sh/typesafe/v1/systemone，model=typesafe-ai/jev，key=AI_GATEWAY_API_KEY
+由 settings["jev"]["provider"] 决定；也可经环境变量 JEV_BASE_URL / JEV_MODEL 强制覆盖。
 """
 from __future__ import annotations
 
@@ -20,8 +23,19 @@ import time
 
 import requests
 
-DEFAULT_BASE_URL = "https://api.typesafe.ai/v1/systemone"
-DEFAULT_MODEL = "jev-1.13.0"  # 固定版本，不用 latest（别名会变，破坏可复现）
+# 两种 provider 的默认 endpoint / 模型 / 鉴权变量
+PROVIDERS = {
+    "vercel": {
+        "base_url": "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
+        "model": "typesafe-ai/jev",            # Vercel Gateway 用 provider/model 写法
+        "key_env": "AI_GATEWAY_API_KEY",
+    },
+    "typesafe": {
+        "base_url": "https://api.typesafe.ai/v1/systemone",
+        "model": "jev-1.13.0",                 # 固定版本，不用 latest（别名会变，破坏可复现）
+        "key_env": "TYPESAFE_API_KEY",
+    },
+}
 
 
 def _bucket_mcap(mcap: float) -> str:
@@ -52,13 +66,17 @@ class JevScorer:
     def __init__(self, settings: dict):
         jev_cfg = settings.get("jev", {})
         self.enabled = bool(jev_cfg.get("enabled", False))
-        self.model = jev_cfg.get("model", DEFAULT_MODEL)
-        self.base_url = os.getenv("JEV_BASE_URL") or jev_cfg.get("base_url", DEFAULT_BASE_URL)
+        provider = jev_cfg.get("provider", "typesafe")
+        p = PROVIDERS.get(provider, PROVIDERS["typesafe"])
+        # 优先级：环境变量覆盖 > settings 显式 base_url/model > provider 默认
+        self.base_url = os.getenv("JEV_BASE_URL") or jev_cfg.get("base_url") or p["base_url"]
+        self.model = os.getenv("JEV_MODEL") or jev_cfg.get("model") or p["model"]
+        self.key_env = jev_cfg.get("key_env") or p["key_env"]
+        self.api_key = os.getenv(self.key_env, "")
         self.min_confidence = float(jev_cfg.get("min_confidence", 0.7))
         self.allow_verdicts = jev_cfg.get("allow_verdicts", ["ape", "watch"])
         self.n_samples = int(jev_cfg.get("n_samples", 1))
         self.timeout = int(jev_cfg.get("timeout_seconds", 20))
-        self.api_key = os.getenv("TYPESAFE_API_KEY", "")
         # 没有 key 就不可用，main 会降级；不抛异常。
         self.available = bool(self.api_key) and self.enabled
 
@@ -107,7 +125,7 @@ class JevScorer:
                 "instructions": "How strong is the overall setup conviction, from weakest to exceptional?",
                 "criteria": [
                     "very weak", "weak", "below average", "neutral", "above average",
-                    "good", "strong", "very strong", "high", "very high", "exceptional",
+                    "good", "strong", "very strong", "high", "exceptional",
                 ],
             },
             "high_conviction": {
@@ -131,7 +149,7 @@ class JevScorer:
             except requests.RequestException as e:
                 raise RuntimeError(f"Jev 请求异常: {e}") from e
             if r.status_code == 401:
-                raise RuntimeError("Jev 401: API key 无效（检查 TYPESAFE_API_KEY）")
+                raise RuntimeError(f"Jev 401: API key 无效（检查 {self.key_env}）")
             if r.status_code == 422:
                 raise RuntimeError(f"Jev 422: 请求格式错误 {r.text[:300]}")
             if r.status_code in (429, 529):

@@ -48,7 +48,7 @@ crypto-alpha-radar/
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # 填入 GMGN_API_KEY、EMAIL_TO、SMTP_*，可选 TYPESAFE_API_KEY（Jev 裁决）
+cp .env.example .env        # 填入 AI_GATEWAY_API_KEY（Jev 裁决）、EMAIL_TO、SMTP_*；GMGN_API_KEY 可选（抓地址用）
 python main.py --dry-run    # 先空跑看输出
 python main.py              # 正式跑（达到阈值推邮箱）
 python main.py --chain sol eth   # 只跑指定链
@@ -57,7 +57,7 @@ python main.py --chain sol eth   # 只跑指定链
 ## 四、部署到 GitHub Actions（零成本、无服务器）
 
 1. 把仓库设为 **Public**（或 Private 也行，Actions 免费额度有限）。
-2. Settings → Secrets → 添加：`GMGN_API_KEY`、`EMAIL_TO`、`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`、`TYPESAFE_API_KEY`（可选 `LUNARCRUSH_API_KEY`、`JEV_BASE_URL`）。
+2. Settings → Secrets → 添加：`AI_GATEWAY_API_KEY`、`EMAIL_TO`、`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`（可选 `GMGN_API_KEY`、`TYPESAFE_API_KEY`、`LUNARCRUSH_API_KEY`、`JEV_BASE_URL`）。
 3. 已内置 `.github/workflows/scheduled.yml`，每 30 分钟自动跑并推邮箱。
 
 ## 五、评分逻辑（贴合"小亏大赚"）
@@ -81,16 +81,18 @@ python main.py --chain sol eth   # 只跑指定链
 
 **为什么用 Jev 而不用启发式硬权重**：Jev 在「对结构化特征做分类」上更稳（社媒多空、合约安全、是否 bait），回测也证明它**不是方向预测器**（方向命中率 ~0.49、过度自信），所以定位是「过滤器/评级器」，不是水晶球——正好贴合「小亏大赚」：帮挡噪音、给确定性打分，不替你 call 顶底。
 
-**接入方式**：
-1. 注册 https://console.typesafe.ai 拿 key（新用户送 $5 额度，约 1.2 亿 input token，够长期测）。
-2. 填 `.env` 的 `TYPESAFE_API_KEY`（Actions 里填 Secret）。成本极低（input $0.042/百万 token、output 免费，本项目约 $0.01–0.4/月）。
+**接入方式（两种，请求/响应格式完全兼容，只改 endpoint / model / key）**：
+- **推荐 · Vercel AI Gateway（免费）**：注册 Vercel → AI Gateway → API Keys，拿 `AI_GATEWAY_API_KEY`。Jev 是 Gateway 的 **free-tier 模型**，每月免费 credits 直接覆盖（本项目跑一个月也就几美分级别）。`config/settings.json` 已默认 `provider: "vercel"`，model 自动用 `typesafe-ai/jev`。
+- **备选 · TypeSafe 直连**：https://console.typesafe.ai 拿 `TYPESAFE_API_KEY`（注意：2026-09-22 起新注册暂停送额度，需自行充值或作 Vercel BYOK）。把 `provider` 改为 `"typesafe"` 即用直连（`jev-1.13.0`）。
+
+2. 把 key 填进 `.env` 的 `AI_GATEWAY_API_KEY`（Actions 里填 Secret `AI_GATEWAY_API_KEY`）。成本极低（input $0.042/百万 token、output 免费）。
 3. `config/settings.json` 的 `jev` 段：
-   - `enabled`：true 即启用。
-   - `model`：固定 `jev-1.13.0`（**别用 `jev-latest`**，别名会变、破坏可复现）。
+   - `enabled`：true 即启用（已默认）。
+   - `provider`：`vercel`（默认，走 Gateway）或 `typesafe`（直连）。
    - `min_confidence`：裁决置信度阈值（默认 0.7）。
    - `allow_verdicts`：允许推送的裁决（默认 `["ape","watch"]`，即 avoid 不推）。
    - `n_samples`：同请求采样次数取平均（Jev 非确定性，差可达 0.07；默认 1，想更稳设 3）。
-4. **降级保障**：不填 `TYPESAFE_API_KEY` 或 `enabled=false` 时，`JevScorer.available=False`，main 自动退回纯启发式（达阈值即推），不报错。填了 key 但某次调用失败，该 token 本轮回退丢弃（保守，防误报）。
+4. **降级保障**：不填 key 或 `enabled=false` 时，`JevScorer.available=False`，main 自动退回纯启发式（达阈值即推），不报错。填了 key 但某次调用失败，该 token 本轮回退丢弃（保守，防误报）。
 
 > 注意：Jev 仅文本、**英文最佳**，状态已统一翻成英文 label；中文直接喂效果差。
 
