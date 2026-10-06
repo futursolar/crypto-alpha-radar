@@ -56,10 +56,10 @@ def format_body(results: list[dict]) -> str:
         reasons = "<br>".join("· " + x for x in r["social"]["reasons"]) or "—"
         mcap_k = f"${float(tk.get('market_cap') or 0) / 1000:.0f}K"
         rows += (
-            f"<tr><td>{tk['chain']}</td>"
-            f"<td><a href='{tk['url']}'>{tk['symbol']}</a></td>"
+            f"<tr><td>{tk.get('chain', '?')}</td>"
+            f"<td><a href='{tk.get('url', '#')}'>{tk.get('symbol', '?')}</a></td>"
             f"<td>{mcap_k}</td>"
-            f"<td>{tk['smart_buy']}/{tk['smart_sell']}</td>"
+            f"<td>{tk.get('smart_buy', 0)}/{tk.get('smart_sell', 0)}</td>"
             f"<td><b>{r['score']['score']}</b></td>"
             f"<td>{reasons}</td></tr>"
         )
